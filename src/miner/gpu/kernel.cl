@@ -464,16 +464,20 @@ __kernel void h(__global header_t* header, uint threshold, uint M/* , __global h
     SHA256_P(v1, v2, v3, v4, v5, v6, v7, v0, SHA256_RD15, 0xC67178F2);
 
     v0 += 0x6A09E667;
-    v1 += 0xBB67AE85;
-    v2 += 0x3C6EF372;
-    v3 += 0xA54FF53A;
-    v4 += 0x510E527F;
-    v5 += 0x9B05688C;
-    v6 += 0x1F83D9AB;
-    v7 += 0x5BE0CD19;
+    //v1 += 0xBB67AE85;  // don't need it as we use only v0
+    //v2 += 0x3C6EF372;
+    //v3 += 0xA54FF53A;
+    //v4 += 0x510E527F;
+    //v5 += 0x9B05688C;
+    //v6 += 0x1F83D9AB;
+    //v7 += 0x5BE0CD19;
 
-    const uint c = C_CONSTANT;
-    if (v0 >= c && v0 < threshold) {
+
+  //      const uint c = C_CONSTANT; 
+  //     0b00000001010001111010111000010100 =7.64385618977=c
+
+   if (v0 >=0b00000001010001111010111000010100 && v0 < threshold) {
+   
         uint pos = 2 * atomic_inc(out) + 1;
         if (pos < 2 * M) {
             out[pos + 0] = gid;
