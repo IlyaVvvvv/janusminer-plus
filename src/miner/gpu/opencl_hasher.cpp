@@ -6,6 +6,12 @@
 #include "spdlog/spdlog.h"
 #include <iostream>
 
+// not a right way to place it here, TODO: to make a cleaner code)
+extern uint32_t gpubatchsize; 
+extern bool autofiltering;
+extern double gpu_manual_filter_bound;
+extern double filter_bound;
+
 JobNonceTracker::JobNonceTracker(job::Job j)
     : j(std::move(j))
     , remaining(size_t(std::numeric_limits<uint32_t>::max()) + 1)
@@ -147,9 +153,10 @@ void Sha256tGPUHasher::handle_finished_job(TripleSha::MinedValues mv) // is call
     //     cout << "duration: " << *duration / 1.0ms << " milliseconds" << endl;
     // }
     auto [currentHashrate, delta] = hashrate();
-    N = currentHashrate.val / 20;
-    if (N < 1000)
-        N = 1000;
+   // N = currentHashrate.val / 20; //
+   N=gpubatchsize; // this is not right but somehow playing with N is giving unstable load on gpus
+   // if (N < 1000)
+   //     N = 1000;
     parent.handle_finished_job(std::move(mv), { delta });
     try_start();
 }
@@ -198,7 +205,7 @@ void Sha256tGPUHasher::try_start()
     if (active) {
         double f { fraction() };
         runner1.try_start(queue, f, N, functor);
-        runner2.try_start(queue, f, N, functor);
+       //runner2.try_start(queue, f, N, functor); //don't know why we need runner2, but without it seems works better, feels like extra load on pcie, maybe it's nvidia thing
     }
 }
 
@@ -209,7 +216,66 @@ void Sha256tOpenclHasher::update_fraction_locked()
     if (!verushashrate)
         return;
     auto& vh(*verushashrate);
+    
 
+    if (autofiltering==true){ //autofiltering
+        // if we tune filtering from current verus hashrate it leads to a loop of reducing filtering range, which eventualy leads to a lower verus hashrate than we could get
+        // to avoid it we need to start calculating it from max verus and max sha256t hashrate that we have catched:
+
+    	if(maxsha256th*1.05<totalHashrate){  //to keep max unfiltered sha256t hashrate that gpus can handle, 1.05 to smooth random spikes
+        	maxsha256th=(totalHashrate+maxsha256th)/2; // to smooth 
+        	//spdlog::info("new maxsha256th={}", maxsha256th); 
+       		 gpufilterbound=log2( maxsha256th /(maxvh+ (maxsha256th/200)) );  // calculating gpufilterbound from max hashrate values
+       		// spdlog::info("new gpufilterbound={}", gpufilterbound);   
+   	 }
+    
+    	if (maxvh*1.08<verushashrate.value()){          // to keep max verus hashrate that cpu can handle, 1.08 to smooth random spikes,
+    						        // as we start from gpufilterbound=1.0 cpu will have 100% load, so we definitely gonna get this value
+                                                        // little problem: pcie bus and buffer load eats about 4-6% cpu hashrate so the real maxvh will be little lower
+    		maxvh=(verushashrate.value()*0.97);     // reserve 3% (%?) for other work that cpu should handle (pcie load, buffer, pool connection etc)  
+    		//spdlog::info("new maxvh={}", maxvh); 
+    		if(totalHashrate==0){    //it happens sometimes (new block, lost connection etc) but cpu still have job in buffer, so we can catch maxvh that is way higher than cpu can sustain in normal conditions
+    			gpufilterbound/=2; //this should restart tuning again 
+    	       		maxvh/=2;          //this should restart tuning again 
+    		}else{ 
+    	        // calculating gpufilterbound from max hashrate values:	
+    		gpufilterbound=log2( ((totalHashrate+maxsha256th)/2) /(maxvh+ ( ((totalHashrate+maxsha256th)/2) /200))); // using average sha256t hashrate from (totalHashrate+maxsha256th)/2 
+    															 //TODO: to find more accurate upper limit sha256t hashrate from gpus
+    		//spdlog::info("new gpufilterbound={}", gpufilterbound);   
+    	  	 
+    		}
+    	}
+    	
+    	// filtered_sha256_stream. If we compare it to current verus hashrate, we can estimate are we sending to cpu too much or not enough:
+    	filtered_sha256_stream=(totalHashrate/pow(2,gpufilterbound)-(totalHashrate/200)); 
+    	
+    	// mean of a filtered gpu to cpu function: (1/(0-"CPU"))*∫log2("GPU"/(y+("GPU"/200)))dy from "CPU" to 0 // see https://www.desmos.com/Calculator/lcjylqepyv for more details
+    	// used only for observation
+    	average_sha256t=((((totalHashrate+200*filtered_sha256_stream)*log(1+200*double(filtered_sha256_stream)/totalHashrate))/200)-(filtered_sha256_stream*(log(200)+1)))/(log(2)*(-filtered_sha256_stream)); 
+    	
+    	//finetune:
+    	if(filtered_sha256_stream/verushashrate.value()>1.1){ //we are sending too much, not enough filtering 
+    		gpufilterbound+=0.001; 			     //this should help to finetune
+    	}
+    	if(filtered_sha256_stream/verushashrate.value()<0.9){ //we are sending not enough, too much filtering 
+    		gpufilterbound-=0.001;                       //this should help to finetune
+    	}
+    	
+    }else{ // manual filtering
+    	gpufilterbound=gpu_manual_filter_bound; // setting manual filtering from value given in arg
+    	filtered_sha256_stream=(totalHashrate/pow(2,gpufilterbound)-(totalHashrate/200)); // // filtered_sha256_stream, with manual filtering we are using it only for observation
+    	
+    	if(totalHashrate!=0){ //with totalHashrate==0 in the next step there is nothing to calculate
+    		// mean of a filtered gpu to cpu function: (1/(0-"CPU"))*∫log2("GPU"/(y+("GPU"/200)))dy from "CPU" to 0 // see https://www.desmos.com/Calculator/lcjylqepyv for more details
+    		// used only for observation
+    		average_sha256t=((((totalHashrate+200*filtered_sha256_stream)*log(1+200*double(filtered_sha256_stream)/totalHashrate))/200)-(filtered_sha256_stream*(log(200)+1)))/(log(2)*(-filtered_sha256_stream));
+    	}
+    }
+    if (gpufilterbound<1){     // just in case
+    	gpufilterbound=1; //not sure if we need this here but with values <1 filtering may be broken
+    }   
+    filter_bound=gpufilterbound; //setting calculated gpufilterbound
+    
     if (totalHashrate == 0)
         fraction = 1.0;
 
@@ -242,6 +308,17 @@ std::pair<uint64_t, std::vector<std::tuple<uint32_t, std::string, uint64_t>>> Sh
         auto [hashrate, delta] = h->hashrate();
         totalHashrate += delta;
         v.push_back({ h->deviceIndex, h->deviceName, hashrate });
+       // spdlog::info("totalHashrate={}, delta={}, h->deviceName={}, hashrate={} ", totalHashrate,delta, h->deviceName, hashrate);
+       
+        // TODO
+        // After a long run sometimes total hashrate is calculated wrong (adds x2-3 more than it should be),
+        // can't catch when it's happens, hashrates per devices is shown ok at the same time
+        // it can ruin calculation of filtering bound
+        // DONE: opencl_hasher.hpp:340
+        // totalHashrate do not set to 0, if there is a drop in connection to a node and stop_mining happens. That's because delta is already set to 0.
+
+        
+                                                                                                               			  
     }
     return { totalHashrate, std::move(v) };
 };
