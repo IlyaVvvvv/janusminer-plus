@@ -10,6 +10,10 @@ option "threads" t "Number of CPU worker threads, use 0 for hardware concurrency
 option "host" h "Host (RPC-Node)" string default="localhost" optional
 option "port" p "Port (RPC-Node)" int default="3000" optional
 
+option "gpubatchsize" g "Gpu batchsize" int default="20000000" optional
+option "gpufilter" f "Manual sha256t filtering bound, filtering will be from 2^(-gpufilter) to 2^(-7.64), specify without \"-\" like \"5.5\" " double default="1.0" optional
+
+
 option "address" a "Specify address that is mined to (for mining directly to node)" string default="" typestr="WALLETADDRESS" optional
 
 option "queuesize" q "Queuesize in GB" int default="4" optional
