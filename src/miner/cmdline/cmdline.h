@@ -51,6 +51,12 @@ struct gengetopt_args_info
   int port_arg;	/**< @brief Port (RPC-Node) (default='3000').  */
   char * port_orig;	/**< @brief Port (RPC-Node) original value given at command line.  */
   const char *port_help; /**< @brief Port (RPC-Node) help description.  */
+  int gpubatchsize_arg;	/**< @brief Gpu batchsize (default='20000000').  */
+  char * gpubatchsize_orig;	/**< @brief Gpu batchsize original value given at command line.  */
+  const char *gpubatchsize_help; /**< @brief Gpu batchsize help description.  */
+  double gpufilter_arg;	/**< @brief Manual sha256t filtering bound, filtering will be from 2^(-gpufilter) to 2^(-7.64), specify without \"-\" like \"5.5\"  (default='1.0').  */
+  char * gpufilter_orig;	/**< @brief Manual sha256t filtering bound, filtering will be from 2^(-gpufilter) to 2^(-7.64), specify without \"-\" like \"5.5\"  original value given at command line.  */
+  const char *gpufilter_help; /**< @brief Manual sha256t filtering bound, filtering will be from 2^(-gpufilter) to 2^(-7.64), specify without \"-\" like \"5.5\"  help description.  */
   char * address_arg;	/**< @brief Specify address that is mined to (for mining directly to node) (default='').  */
   char * address_orig;	/**< @brief Specify address that is mined to (for mining directly to node) original value given at command line.  */
   const char *address_help; /**< @brief Specify address that is mined to (for mining directly to node) help description.  */
@@ -70,6 +76,8 @@ struct gengetopt_args_info
   unsigned int threads_given ;	/**< @brief Whether threads was given.  */
   unsigned int host_given ;	/**< @brief Whether host was given.  */
   unsigned int port_given ;	/**< @brief Whether port was given.  */
+  unsigned int gpubatchsize_given ;	/**< @brief Whether gpubatchsize was given.  */
+  unsigned int gpufilter_given ;	/**< @brief Whether gpufilter was given.  */
   unsigned int address_given ;	/**< @brief Whether address was given.  */
   unsigned int queuesize_given ;	/**< @brief Whether queuesize was given.  */
   unsigned int user_given ;	/**< @brief Whether user was given.  */
