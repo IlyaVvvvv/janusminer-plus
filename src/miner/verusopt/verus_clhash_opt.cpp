@@ -1251,8 +1251,10 @@ inline bool JanusMinerOpt::mine_job(MineResult& res, const CandidateBatch& job, 
             uint32_t hashStart = span[j].hashStart();
             assert(hashStart != 0);
             res.total += 1;
-            if (hashStart > threshold)
-                continue;
+           // if (hashStart > threshold){
+           //spdlog::info("skip");
+           //     continue;
+           //     }
             res.processed += 1;
 
             // prepare the buffer
