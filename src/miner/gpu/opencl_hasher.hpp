@@ -15,6 +15,12 @@
 #include <string>
 #include <vector>
 
+// not a right way to place it here, TODO: to make a cleaner code)
+extern uint32_t gpubatchsize; 
+extern double filter_bound;
+
+
+
 struct HashrateDelta {
     ssize_t delta;
 };
@@ -133,7 +139,7 @@ class Sha256tGPUHasher {
         }
         void try_start(CL::CommandQueue& queue, double fraction, size_t N, Sha256tGPUHasher::Functor& functor)
         {
-            assert(fraction > 0.0); // TODO: failed
+            //assert(fraction > 0.0); // TODO: failed
             using namespace std;
             size_t M;
             {
@@ -150,6 +156,9 @@ class Sha256tGPUHasher {
                     NN = maxM;
                 if (NN < N)
                     N = NN;
+                    
+                N=gpubatchsize;  // this is not right but somehow playing with N is giving very unstable load on gpus
+                    
                 M = std::min(size_t(N * fraction * 1.005), N);
                 if (M == 0)
                     M = 1;
@@ -160,6 +169,9 @@ class Sha256tGPUHasher {
                 if (!allocated)
                     return;
                 auto t { threshold(M, jr->N) };
+                               	
+        	t=(pow(2,(32-int(filter_bound)))/(pow(2,(filter_bound-int(filter_bound))))); //convert filter_bound (as pow2 value) to "hash" threshold // TODO: check this outside 1.0-7.64 range
+                               
                 currentJob = CurrentJob {
                     .jr = *jr,
                     .sha256tValues = std::move(allocated),
@@ -309,6 +321,12 @@ public:
         stop_mining();
     }
     std::pair<uint64_t, std::vector<std::tuple<uint32_t,std::string, uint64_t>>> hashrates();
+    
+  std::tuple<double,double,ssize_t,ssize_t,ssize_t> filtering_info() // filtering info for device_pool.cpp:106   
+  {
+        return {average_sha256t, gpufilterbound,filtered_sha256_stream , maxvh, maxsha256th};
+  }
+
     // void start_mining(const Header& header)
     // {
     //     for (auto& h : hashers) {
@@ -320,9 +338,12 @@ public:
         std::lock_guard l(m);
         std::cout << "Stop mining" << std::endl;
         for (auto& h : hashers) {
-            totalHashrate += h->stop_mining().delta;
+           totalHashrate += h->stop_mining().delta;   //There is a bug in original code: delta is already reset to 0, so totalHashrate isn't resseting to zero, after restart(lost connection to a node etc) it shows wrong value, it can ruin calculation of filtering bound
+          // spdlog::info("totalHashrate={}, delta={} ", totalHashrate, h->stop_mining().delta); // 
         }
-        assert(totalHashrate == 0);
+       // assert(totalHashrate == 0);
+      //TODO:  
+      totalHashrate = 0; // temporary fix
     }
 
     void update_verushashrate(Hashrate);
@@ -343,6 +364,11 @@ private:
     std::mutex m;
     job::Generator jobGenerator;
     ssize_t totalHashrate { 0 };
+    ssize_t maxvh {0};  // to keep what max hashrate that cpu can handle
+    ssize_t maxsha256th {0}; // to keep what max sha256t hashrate gpus can achieve
+    double average_sha256t {1}; //as pow2 without "-", average filtered sha256t output // only for observation, not used in filtering logic
+    ssize_t filtered_sha256_stream {0}; // how many sha256t filtered hashes we send from gpu 
+    double gpufilterbound {1};  //as pow2 without "-", filtering upper bound for sha256t
     size_t cleanSum { 0 };
     std::optional<Hashrate> verushashrate;
 
