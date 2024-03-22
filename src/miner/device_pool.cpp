@@ -102,6 +102,11 @@ void MiningCoordinator::print_hashrate()
         spdlog::info("   Thread#{}: {}/s", i, verusHashrates[i].format().to_string());
     }
     spdlog::info("Janusscore: {}/s", janusscore(sumVerus.val, sumSha256t).format().to_string());
+    
+    auto [average_sha256t, gpufilterbound,filtered_sha256, maxcpuhashrate, maxgpuhashrate]=sha256tHasher.filtering_info(); // get filtering info
+    //spdlog::info("filtered_sha256_stream={}, maxvh={}, maxsha256th={}",filtered_sha256, maxcpuhashrate, maxgpuhashrate);  // for debugging
+    spdlog::info("filtering from -{} to -7.64, filtered sha256t stream to cpu: {}/s", round(gpufilterbound*100)/100, Hashrate(filtered_sha256).format().to_string()); 
+    spdlog::info("estimated average sha256t: 2^(-{}), with factor 0.7 estimated boost to cpu: x{}", round(average_sha256t*100)/100, round((pow(2, average_sha256t*0.7))*10)/10); 
 }
 
 void MiningCoordinator::handle_event(const WorkerResult& wr)
@@ -213,7 +218,7 @@ void MiningCoordinator::assign_work(const Block& b, bool testnet)
         .testnet = testnet
     };
     if (clean) {
-        spdlog::info("Difficulty {}", mj.t.difficulty());
+        spdlog::info("Difficulty {}, 2^{}", mj.t.difficulty(), round(log2(mj.t.difficulty())*100)/100 );  // easier to read
     }
     if (currentHeader == b.header)
         return;
