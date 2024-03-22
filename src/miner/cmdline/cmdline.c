@@ -40,6 +40,8 @@ const char *gengetopt_args_info_help[] = {
   "  -t, --threads=INT            Number of CPU worker threads, use 0 for hardware\n                                 concurrency.   (default=`0')",
   "  -h, --host=STRING            Host (RPC-Node)  (default=`localhost')",
   "  -p, --port=INT               Port (RPC-Node)  (default=`3000')",
+  "  -g, --gpubatchsize=INT       Gpu batchsize  (default=`20000000')",
+  "  -f, --gpufilter=DOUBLE       Manual sha256t filtering bound, filtering will\n                                 be from 2^(-gpufilter) to 2^(-7.64), specify\n                                 without \"-\" like \"5.5\"   (default=`1.0')",
   "  -a, --address=WALLETADDRESS  Specify address that is mined to (for mining\n                                 directly to node)  (default=`')",
   "  -q, --queuesize=INT          Queuesize in GB  (default=`4')",
   "  -u, --user=STRING            Enable stratum protocol and specify username\n                                 (default=`')",
@@ -50,6 +52,7 @@ const char *gengetopt_args_info_help[] = {
 typedef enum {ARG_NO
   , ARG_STRING
   , ARG_INT
+  , ARG_DOUBLE
 } cmdline_parser_arg_type;
 
 static
@@ -74,6 +77,8 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->threads_given = 0 ;
   args_info->host_given = 0 ;
   args_info->port_given = 0 ;
+  args_info->gpubatchsize_given = 0 ;
+  args_info->gpufilter_given = 0 ;
   args_info->address_given = 0 ;
   args_info->queuesize_given = 0 ;
   args_info->user_given = 0 ;
@@ -92,6 +97,10 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->host_orig = NULL;
   args_info->port_arg = 3000;
   args_info->port_orig = NULL;
+  args_info->gpubatchsize_arg = 20000000;
+  args_info->gpubatchsize_orig = NULL;
+  args_info->gpufilter_arg = 1.0;
+  args_info->gpufilter_orig = NULL;
   args_info->address_arg = gengetopt_strdup ("");
   args_info->address_orig = NULL;
   args_info->queuesize_arg = 4;
@@ -114,10 +123,12 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->threads_help = gengetopt_args_info_help[3] ;
   args_info->host_help = gengetopt_args_info_help[4] ;
   args_info->port_help = gengetopt_args_info_help[5] ;
-  args_info->address_help = gengetopt_args_info_help[6] ;
-  args_info->queuesize_help = gengetopt_args_info_help[7] ;
-  args_info->user_help = gengetopt_args_info_help[8] ;
-  args_info->password_help = gengetopt_args_info_help[9] ;
+  args_info->gpubatchsize_help = gengetopt_args_info_help[6] ;
+  args_info->gpufilter_help = gengetopt_args_info_help[7] ;
+  args_info->address_help = gengetopt_args_info_help[8] ;
+  args_info->queuesize_help = gengetopt_args_info_help[9] ;
+  args_info->user_help = gengetopt_args_info_help[10] ;
+  args_info->password_help = gengetopt_args_info_help[11] ;
   
 }
 
@@ -213,6 +224,8 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->host_arg));
   free_string_field (&(args_info->host_orig));
   free_string_field (&(args_info->port_orig));
+  free_string_field (&(args_info->gpubatchsize_orig));
+  free_string_field (&(args_info->gpufilter_orig));
   free_string_field (&(args_info->address_arg));
   free_string_field (&(args_info->address_orig));
   free_string_field (&(args_info->queuesize_orig));
@@ -262,6 +275,10 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "host", args_info->host_orig, 0);
   if (args_info->port_given)
     write_into_file(outfile, "port", args_info->port_orig, 0);
+  if (args_info->gpubatchsize_given)
+    write_into_file(outfile, "gpubatchsize", args_info->gpubatchsize_orig, 0);
+  if (args_info->gpufilter_given)
+    write_into_file(outfile, "gpufilter", args_info->gpufilter_orig, 0);
   if (args_info->address_given)
     write_into_file(outfile, "address", args_info->address_orig, 0);
   if (args_info->queuesize_given)
@@ -439,6 +456,9 @@ int update_arg(void *field, char **orig_field,
   case ARG_INT:
     if (val) *((int *)field) = strtol (val, &stop_char, 0);
     break;
+  case ARG_DOUBLE:
+    if (val) *((double *)field) = strtod (val, &stop_char);
+    break;
   case ARG_STRING:
     if (val) {
       string_field = (char **)field;
@@ -454,6 +474,7 @@ int update_arg(void *field, char **orig_field,
   /* check numeric conversion */
   switch(arg_type) {
   case ARG_INT:
+  case ARG_DOUBLE:
     if (val && !(stop_char && *stop_char == '\0')) {
       fprintf(stderr, "%s: invalid numeric value: %s\n", package_name, val);
       return 1; /* failure */
@@ -532,6 +553,8 @@ cmdline_parser_internal (
         { "threads",	1, NULL, 't' },
         { "host",	1, NULL, 'h' },
         { "port",	1, NULL, 'p' },
+        { "gpubatchsize",	1, NULL, 'g' },
+        { "gpufilter",	1, NULL, 'f' },
         { "address",	1, NULL, 'a' },
         { "queuesize",	1, NULL, 'q' },
         { "user",	1, NULL, 'u' },
@@ -539,7 +562,7 @@ cmdline_parser_internal (
         { 0,  0, 0, 0 }
       };
 
-      c = getopt_long (argc, argv, "Vt:h:p:a:q:u:", long_options, &option_index);
+      c = getopt_long (argc, argv, "Vt:h:p:g:f:a:q:u:", long_options, &option_index);
 
       if (c == -1) break;	/* Exit from `while (1)' loop.  */
 
@@ -582,6 +605,30 @@ cmdline_parser_internal (
               &(local_args_info.port_given), optarg, 0, "3000", ARG_INT,
               check_ambiguity, override, 0, 0,
               "port", 'p',
+              additional_error))
+            goto failure;
+        
+          break;
+        case 'g':	/* Gpu batchsize.  */
+        
+        
+          if (update_arg( (void *)&(args_info->gpubatchsize_arg), 
+               &(args_info->gpubatchsize_orig), &(args_info->gpubatchsize_given),
+              &(local_args_info.gpubatchsize_given), optarg, 0, "20000000", ARG_INT,
+              check_ambiguity, override, 0, 0,
+              "gpubatchsize", 'g',
+              additional_error))
+            goto failure;
+        
+          break;
+        case 'f':	/* Manual sha256t filtering bound, filtering will be from 2^(-gpufilter) to 2^(-7.64), specify without \"-\" like \"5.5\" .  */
+        
+        
+          if (update_arg( (void *)&(args_info->gpufilter_arg), 
+               &(args_info->gpufilter_orig), &(args_info->gpufilter_given),
+              &(local_args_info.gpufilter_given), optarg, 0, "1.0", ARG_DOUBLE,
+              check_ambiguity, override, 0, 0,
+              "gpufilter", 'f',
               additional_error))
             goto failure;
         
